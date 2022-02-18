@@ -68,9 +68,9 @@ try {
 }
 catch (Exception $e) {}
 
-$file = fopen("/data/project/swviewer/public_html/lists/activeSysops.txt", "w+");
-fwrite($file, json_encode($result));
-fclose($file);
+$f = fopen("/data/project/swviewer/public_html/lists/activeSysops.txt", "w+");
+fwrite($f, json_encode($result));
+fclose($f);
 
 function getContent($url, $context, $sec) {
     $cont = false; $i = 0;
