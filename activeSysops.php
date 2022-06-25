@@ -94,6 +94,7 @@ function replace_wiki_name($wiki)
     $wiki = preg_replace("/^(.*)?mediawikiwiki$/i", "mediawiki.org", $wiki);
     $wiki = preg_replace("/^(.*)?wikinews$/i", "$1.wikinews.org", $wiki);
     $wiki = preg_replace("/^(.*)?wikiversity$/i", "$1.wikiversity.org", $wiki);
+    $wiki = preg_replace("/foundationwiki/i", "foundation.wikimedia.org", $wiki);
     $wiki = preg_replace("/^(.*)?wikimaniawiki$/i", "wikimania.wikimedia.org", $wiki);
     $wiki = preg_replace("/^(.*)?outreachwiki$/i", "outreach.wikimedia.org", $wiki);
     $wiki = preg_replace("/^(.*)?testcommonswiki$/i", "test-commons.wikimedia.org", $wiki);
