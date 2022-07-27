@@ -5,7 +5,6 @@ import json
 import time
 from urllib.request import urlopen
 import toolforge
-smallffff
 
 sql = """SELECT site_global_key AS wiki, TRIM(trailing '.org' 
 FROM trim(leading '.' FROM REVERSE(site_domain))) AS domain FROM sites"
