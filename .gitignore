@@ -1,4 +1,3 @@
-wars.py
 *.err
 *.out
 
@@ -133,3 +132,4 @@ dmypy.json
 .pyre/
 
 .idea/
+/stats.py

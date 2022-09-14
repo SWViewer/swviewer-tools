@@ -8,13 +8,23 @@ wikis_result, user_agent, delay = {}, {"User-Agent": "Iluvatar@toolforge; python
 data = {"action": "query", "format": "json", "utf8": 1, "list": "wikisets", "wsfrom": "Opted-out of global sysop wikis",
         "wsprop": "wikisincluded"}
 url = "https://meta.wikimedia.org/w/api.php"
-sql = """SELECT COUNT(actor_name) AS active FROM user_groups JOIN actor ON actor_user = ug_user AND ug_group = "sysop"
+sql = """-- active sysops
+SELECT COUNT(actor_name) AS active FROM user_groups JOIN actor ON actor_user = ug_user AND ug_group = "sysop"
 WHERE EXISTS (SELECT rev_id FROM revision_userindex WHERE actor_id = rev_actor
 AND LEFT (rev_timestamp, 8) >= REPLACE (CURDATE() - interval 2 month, '-', '') LIMIT 1)
 OR EXISTS (SELECT log_id FROM logging_userindex WHERE actor_id = log_actor
 AND LEFT (log_timestamp, 8) >= REPLACE (CURDATE() - interval 2 month, '-', '') LIMIT 1)
+-- total sysops
 UNION ALL SELECT COUNT(ug_user) AS total FROM user_groups WHERE ug_group = "sysop"
-"""
+-- actove sysop for w-detect
+UNION ALL
+SELECT COUNT(actor_name) AS active FROM user_groups JOIN actor ON actor_user = ug_user AND ug_group = "sysop"
+WHERE (EXISTS (
+SELECT rev_id FROM revision_userindex WHERE actor_id = rev_actor AND
+LEFT (rev_timestamp, 8) >= REPLACE (CURDATE() - interval 1 week, '-', '') LIMIT 1) OR
+EXISTS (
+SELECT log_id FROM logging_userindex WHERE actor_id = log_actor AND
+LEFT (log_timestamp, 8) >= REPLACE (CURDATE() - interval 1 week, '-', '') LIMIT 1))"""
 
 
 def get_wiki_domain(wiki_name):
@@ -47,7 +57,7 @@ def get_sql(project):
             cur.execute(sql)
             result = cur.fetchall()
         conn.close()
-        return [result[0][0], result[1][0]]
+        return [result[0][0], result[1][0], result[2][0]]
     except Exception as sql_error:
         print(sql_error)
         return False
@@ -63,14 +73,14 @@ else:
     for wiki in wikis:
         count = get_sql(wikis[wiki])
         if count:
-            active_sysops_count, total_sysops_count = count[0], count[1]
+            active_sysops_count, total_sysops_count, week_sysops_count = count[0], count[1], count[2]
             if active_sysops_count == 0:
                 status = 0
             elif active_sysops_count == 1 or active_sysops_count == 2:
                 status = 1
             else:
                 status = 3
-            wikis_result[wikis[wiki]] = [get_wiki_domain(wikis[wiki]), status, total_sysops_count, active_sysops_count]
+            wikis_result[wikis[wiki]] = [get_wiki_domain(wikis[wiki]), status, total_sysops_count, active_sysops_count, week_sysops_count]
         time.sleep(delay)
 
     if len(wikis_result) > 100:
