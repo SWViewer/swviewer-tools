@@ -24,7 +24,7 @@ LIMIT = 3  # кол-во откатов на проект, порог опове
 MINUTES = 30  # кол-во минут отсутствия оповещений из проекта от последнего оповещения
 MAX_MESSAGES = 300  # максимум сообщений, получаемых из Discord ботом для очистки
 REPEAT = 10  # задержка между итерациями бота-чистильщика
-# ID канала, ID целевых эмодзи, целевые цвета (для удаления страниц при коде 404), id целевого участника (бота)
+# ID канала, ID целевые эмодзи, целевые цвета (для удаления страниц при коде 404), id целевого участника (бота)
 CHANNEL = {"ID": 1010179563789238295, "EMOJI_IDS": [1010187383796416542, 1010187351064060005, 1010187427417182210],
            "COLORS": [16776960, 65280], "BOT": 1009429427031117935}
 
@@ -408,6 +408,25 @@ def update_wikiset():
     update_wikiset()
 
 
+def streams_start():
+    try:
+        for event in EventSource(STREAM_URL, retry=30000):
+            if event.event == 'message':
+                try:
+                    e = json.loads(event.data)
+                except ValueError:
+                    pass
+                else:
+                    if e["meta"]["stream"] == "mediawiki.revision-tags-change":
+                        revert_handler(e)
+                    else:
+                        delete_handler(e) if "rev_parent_id" in e else new_handler(e)
+    except Exception as e:
+        print("Stream error: {0}".format(e))
+        time.sleep(5 * 60)  # 5 min
+        streams_start()
+
+
 # Запускаем потоки с ботом-чистильщиком обновлением данных
 threading.Thread(target=update_wikiset, name="update").start()
 threading.Thread(target=client.run, args=[TOKEN], kwargs={"reconnect": True, "log_level": logging.ERROR},
@@ -417,18 +436,5 @@ threading.Thread(target=client.run, args=[TOKEN], kwargs={"reconnect": True, "lo
 while len(GLOBAL_GROUPS) == 0 or len(WIKI_SET) == 0:
     time.sleep(1)
 
-try:
-    for event in EventSource(STREAM_URL, retry=30000):
-        if event.event == 'message':
-            try:
-                e = json.loads(event.data)
-            except ValueError:
-                pass
-            else:
-                if e["meta"]["stream"] == "mediawiki.revision-tags-change":
-                    revert_handler(e)
-                else:
-                    delete_handler(e) if "rev_parent_id" in e else new_handler(e)
-except Exception as e:
-    print("Stream error: {0}".format(e))
-    time.sleep(30)
+# Запускаем стримы
+streams_start()
