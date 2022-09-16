@@ -1,19 +1,19 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
+import codecs
+import configparser
 import json
+import logging
 import os
 import re
 import threading
-import logging
 import time
-import codecs
-import configparser
-import discord
-from discord.ext import tasks, commands
 import urllib.parse as quote
 from datetime import datetime, timedelta
+import discord
 import requests
+from discord.ext import tasks, commands
 from sseclient import SSEClient as EventSource
 
 config = configparser.ConfigParser(inline_comment_prefixes="#")
@@ -22,11 +22,14 @@ config.read_file(codecs.open(os.path.dirname(os.getcwd()) + "/swviewer/security/
 UPD_DELAY = 24  # кол-во часов между обновлениями списка проектов
 LIMIT = 3  # кол-во откатов на проект, порог оповещения
 MINUTES = 30  # кол-во минут отсутствия оповещений из проекта от последнего оповещения
-MAX_MESSAGES = 300  # максимум сообщений, получаемых из Discord ботом для очистки
+MAX_MESSAGES = 500  # максимум сообщений, получаемых из Discord ботом для очистки
 REPEAT = 10  # задержка между итерациями бота-чистильщика
-# ID канала, ID целевых эмодзи, целевые цвета (для удаления страниц при коде 404), id целевого участника (бота)
+# ID канала, ID целевых эмодзи, целевые цвета (для удаления страниц при коде 404), id целевого участника (бота),
+# ID канала Readme и ID ролей (v - vandalism / d - deletion / s - spam).
 CHANNEL = {"ID": 1010179563789238295, "EMOJI_IDS": [1010187383796416542, 1010187351064060005, 1010187427417182210],
-           "COLORS": [16776960, 65280], "BOT": 1009429427031117935}
+           "COLORS": [16776960, 65280], "BOT": 1009429427031117935, "README": 1010899364371247194,
+           "README_MSG": 1010902222969774201,
+           "ROLES": {"🇻": 1020352779925061662, "🇩": 1020355145873231964, "🇸": 1020355276953628723}}
 
 
 EDIT_COUNT = int(config["SWVWars"]["edit_count"])  # кол-во правок «новичка» при создании подозрительной страницы
@@ -84,7 +87,9 @@ STREAM_URL = 'https://stream.wikimedia.org/v2/stream/mediawiki.revision-tags-cha
 USER_AGENT = {"User-Agent": "SW-Wars; iluvatar@tools.wmflabs.org; python3.9; requests"}
 TOKEN = config["SWVWars"]["bot_discord_token"]
 Intents = discord.Intents.default()
+Intents.members = True
 Intents.message_content = True
+allowed_mentions = discord.AllowedMentions(roles=True)
 client = commands.Bot(intents=Intents, command_prefix="/")
 GLOBAL_GROUPS = []
 storage = []
@@ -168,7 +173,7 @@ def report(wiki):
     if len(edits_rep) >= LIMIT and wiki_reported == 0:
         descr, url_target = prepare(edits_rep)
         embed = discord.Embed(type="rich", title=wiki.upper(), description=descr, color=0xff0008, url=url_target)
-        send_report(embed)
+        send_report(embed, CHANNEL["ROLES"]["vandalism"])
 
 
 # Проверка тегов в правке
@@ -186,7 +191,7 @@ def another_user(change):
                           .format(change["page_title"].replace("_", " "), change["performer"]["user_text"]
                                   .replace("_", " ")), color=0xffff00, url="https://{0}/wiki/{1}?uselang=en"
                           .format(change["meta"]["domain"], quote.quote_plus(change["page_title"])))
-    send_report(embed)
+    send_report(embed, CHANNEL["ROLES"]["spam"])
 
 
 def new_handler(change):
@@ -244,7 +249,7 @@ def new_handler(change):
                               color=0xffff00, url="https://{0}/wiki/{1}?oldid={2}&uselang=en"
                               .format(change["meta"]["domain"], quote.quote_plus(change["page_title"]),
                                       change["rev_id"]))
-        send_report(embed)
+        send_report(embed, CHANNEL["ROLES"]["spam"])
 
 
 # Обработчик событий стриме revision-create для поиска КБУ
@@ -262,7 +267,7 @@ def delete_handler(change):
                                                                                                 .replace("_", " ")),
                                       color=0x00ff00, url="https://{0}/wiki/{1}?uselang=en"
                                       .format(change["meta"]["domain"], quote.quote_plus(change["page_title"])))
-                send_report(embed)
+                send_report(embed, CHANNEL["ROLES"]["deletion"])
 
 
 # Обработчик событий стрима tags-change для поиска откатов
@@ -325,9 +330,11 @@ async def clear(ctx: commands.Context):
 
 
 # Отправка сообщения
-def send_report(embed):
+def send_report(embed, role):
     channel = client.get_channel(CHANNEL["ID"])
-    client.loop.create_task(channel.send(content="", tts=False, embed=embed))
+    role = discord.utils.get(channel.guild.roles, id=role)
+    client.loop.create_task(channel.send(content=role.mention, tts=False, allowed_mentions=allowed_mentions,
+                                         embed=embed))
 
 
 # функция получения сообщений из Discord, анализа и удаления (задержка в минутах)
@@ -368,6 +375,29 @@ async def get_messages():
                     fetch_msg = await channel.fetch_message(msg.id)
                     await fetch_msg.delete()
                     break
+
+
+# Добавление ролей для оповещения
+@client.event
+async def on_raw_reaction_add(reaction):
+    await role_change(reaction, "add")
+
+
+# Удаление ролей для оповещения
+@client.event
+async def on_raw_reaction_remove(reaction):
+    await role_change(reaction, "remove")
+
+
+# Реализация добавления / удаления ролей
+async def role_change(reaction, action):
+    if reaction.channel_id == CHANNEL["README"] and reaction.message_id == CHANNEL["README_MSG"]:
+        if reaction.emoji.name == "🇩" or reaction.emoji.name == "🇸" or reaction.emoji.name == "🇻":
+            role_id = CHANNEL["ROLES"][reaction.emoji.name]
+            channel = client.get_channel(reaction.channel_id)
+            role = discord.utils.get(channel.guild.roles, id=role_id)
+            member = channel.guild.get_member(reaction.user_id)
+            await member.add_roles(role) if action == "add" else await member.remove_roles(role)
 
 
 # запуск бота-чистильщика
@@ -436,5 +466,4 @@ threading.Thread(target=client.run, args=[TOKEN], kwargs={"reconnect": True, "lo
 while len(GLOBAL_GROUPS) == 0 or len(WIKI_SET) == 0:
     time.sleep(1)
 
-# Запускаем стримы
 streams_start()
