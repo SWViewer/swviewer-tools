@@ -1,37 +1,39 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-import codecs
-import configparser
 import json
-import logging
 import os
 import re
 import threading
+import logging
 import time
+import codecs
+import configparser
+import discord
+from discord.ext import tasks, commands
 import urllib.parse as quote
 from datetime import datetime, timedelta
-import discord
 import requests
-from discord.ext import tasks, commands
 from sseclient import SSEClient as EventSource
 
-config = configparser.ConfigParser(inline_comment_prefixes="#")
-config.read_file(codecs.open(os.path.dirname(os.getcwd()) + "/swviewer/security/wars-config.ini", "r", "utf8"))
 
 UPD_DELAY = 24  # кол-во часов между обновлениями списка проектов
 LIMIT = 3  # кол-во откатов на проект, порог оповещения
 MINUTES = 30  # кол-во минут отсутствия оповещений из проекта от последнего оповещения
 MAX_MESSAGES = 500  # максимум сообщений, получаемых из Discord ботом для очистки
 REPEAT = 10  # задержка между итерациями бота-чистильщика
-# ID канала, ID целевых эмодзи, целевые цвета (для удаления страниц при коде 404), id целевого участника (бота),
-# ID канала Readme и ID ролей (v - vandalism / d - deletion / s - spam).
-CHANNEL = {"ID": 1010179563789238295, "EMOJI_IDS": [1010187383796416542, 1010187351064060005, 1010187427417182210],
+# ID канала, ID целевых эмодзи, целевые цвета (для удаления страниц при коде 404), ID целевого участника (бота),
+# ID канала Readme, ID сообщения с ролями, ID канала для команд и ID ролей (w - war / d - deletion / s - spam).
+CHANNEL = {"ID": 1020710319598883028, "EMOJI_IDS": [1010187383796416542, 1010187351064060005, 1010187427417182210],
            "COLORS": [16776960, 65280], "BOT": 1009429427031117935, "README": 1010899364371247194,
-           "README_MSG": 1010902222969774201,
-           "ROLES": {"🇻": 1020352779925061662, "🇩": 1020355145873231964, "🇸": 1020355276953628723}}
+           "README_MSG": 1010902222969774201, "BOTCOMMANDS": 1020703959763136523,
+           "ROLES": {"🇼": 1020352779925061662, "🇩": 1020355145873231964, "🇸": 1020355276953628723}}
 
 
+logging.basicConfig(level=logging.ERROR, filename=os.path.dirname(os.getcwd()) + "/swviewer/service/wars/logs.txt",
+                    filemode="a+", format="%(asctime)-15s %(levelname)-8s %(message)s")
+config = configparser.ConfigParser(inline_comment_prefixes="#")
+config.read_file(codecs.open(os.path.dirname(os.getcwd()) + "/swviewer/security/wars-config.ini", "r", "utf8"))
 EDIT_COUNT = int(config["SWVWars"]["edit_count"])  # кол-во правок «новичка» при создании подозрительной страницы
 PAGE_SIZE = int(config["SWVWars"]["page_size"])  # предполагаемый вес в байтах спам-страницы
 ELEMENTS = config["SWVWars"]["elements"].split("|-|")  # элементы, при наличии которых, бот пропускает страницу новичка
@@ -142,7 +144,7 @@ def get_next_user(domain, page_id, title, timestamp_stream, timestamp):
             next_rev_id = next_user_raw["query"]["pages"][str(page_id)]["revisions"][0]["revid"]
         except Exception as next_user_error:
             if str(next_user_error) != "'revisions'":
-                print("Get next user error: {0}".format(next_user_error))
+                logging.error("Get next user error: {0}".format(next_user_error))
             pass
         else:
             break
@@ -158,7 +160,7 @@ def get_next_user_groups(domain, user):
         r = requests.post("https://{0}/w/api.php".format(domain), data=data, headers=USER_AGENT).json()
         next_user_groups = r["query"]["users"][0]["groups"]
     except Exception as next_user_groups_error:
-        print("Get groups error: {0}".format(next_user_groups_error))
+        logging.error("Get groups error: {0}".format(next_user_groups_error))
         return []
     else:
         return next_user_groups
@@ -173,7 +175,7 @@ def report(wiki):
     if len(edits_rep) >= LIMIT and wiki_reported == 0:
         descr, url_target = prepare(edits_rep)
         embed = discord.Embed(type="rich", title=wiki.upper(), description=descr, color=0xff0008, url=url_target)
-        send_report(embed, CHANNEL["ROLES"]["vandalism"])
+        send_report(embed, CHANNEL["ROLES"]["🇼"], wiki)
 
 
 # Проверка тегов в правке
@@ -191,7 +193,7 @@ def another_user(change):
                           .format(change["page_title"].replace("_", " "), change["performer"]["user_text"]
                                   .replace("_", " ")), color=0xffff00, url="https://{0}/wiki/{1}?uselang=en"
                           .format(change["meta"]["domain"], quote.quote_plus(change["page_title"])))
-    send_report(embed, CHANNEL["ROLES"]["spam"])
+    send_report(embed, CHANNEL["ROLES"]["🇸"], "{0}: {1}".format(change["database"], change["page_title"]))
 
 
 def new_handler(change):
@@ -224,7 +226,7 @@ def new_handler(change):
             if len([el for el in ELEMENTS if el in text_check_els]) > 0:
                 return
         except Exception as get_raw_error:
-            print("Get check elements text error: {0}".format(get_raw_error))
+            logging.error("Get check elements text error: {0}".format(get_raw_error))
             return
         # Проверка на наличие внешних ссылок на странице (минимум 1)
         try:
@@ -239,7 +241,7 @@ def new_handler(change):
             if len(ext_check["query"]["pages"][str(change["page_id"])]["extlinks"]) == 0:
                 return
         except Exception as links_error:
-            print("Get external links error: {0}".format(links_error))
+            logging.error("Get external links error: {0}".format(links_error))
             return
         prefix_title = "Page" if change["page_namespace"] == 0 else "Userpage"
         embed = discord.Embed(type="rich", title=change["database"].upper(),
@@ -249,7 +251,7 @@ def new_handler(change):
                               color=0xffff00, url="https://{0}/wiki/{1}?oldid={2}&uselang=en"
                               .format(change["meta"]["domain"], quote.quote_plus(change["page_title"]),
                                       change["rev_id"]))
-        send_report(embed, CHANNEL["ROLES"]["spam"])
+        send_report(embed, CHANNEL["ROLES"]["🇸"], "{0}: {1}".format(change["database"], change["page_title"]))
 
 
 # Обработчик событий стриме revision-create для поиска КБУ
@@ -263,11 +265,11 @@ def delete_handler(change):
             if "tags" not in change or change["tags"] != "mw-reverted":
                 # Обработчик в случае нахождения КБУ. Оповещение.
                 embed = discord.Embed(type="rich", title=change["database"].upper(),
-                                      description="Possible SD request\n**Page**:\t{0}.".format(change["page_title"]
-                                                                                                .replace("_", " ")),
+                                      description="Speedy deletion request\n**Page**:\t{0}.".format(change["page_title"]
+                                                                                                    .replace("_", " ")),
                                       color=0x00ff00, url="https://{0}/wiki/{1}?uselang=en"
                                       .format(change["meta"]["domain"], quote.quote_plus(change["page_title"])))
-                send_report(embed, CHANNEL["ROLES"]["deletion"])
+                send_report(embed, CHANNEL["ROLES"]["🇩"], "{0}: {1}".format(change["database"], change["page_title"]))
 
 
 # Обработчик событий стрима tags-change для поиска откатов
@@ -286,7 +288,6 @@ def revert_handler(change):
     for index, item in enumerate(storage):
         if (time.time() - item.timestamp) >= MINUTES * 60:
             del storage[index]
-    print("В работе: {0}.".format(len(storage)))
     # Если в массиве есть уже отправленные правки из проекта (соответственно, X мин не прошло)
     if len([x for x in storage if x.wiki == change["database"] and x.reported]) > 0:
         return
@@ -320,8 +321,8 @@ def revert_handler(change):
 # Обработчик команды "/clear", которая удаляет все сообщения бота
 @client.command()
 async def clear(ctx: commands.Context):
-    if ctx.channel.id == CHANNEL["ID"]:
-        channel = client.get_channel(ctx.channel.id)
+    if ctx.channel.id == CHANNEL["BOTCOMMANDS"]:
+        channel = client.get_channel(CHANNEL["ID"])
         messages = channel.history(limit=MAX_MESSAGES)
         async for msg in messages:
             if msg.author.id == CHANNEL["BOT"]:
@@ -330,11 +331,14 @@ async def clear(ctx: commands.Context):
 
 
 # Отправка сообщения
-def send_report(embed, role):
+def send_report(embed, role, short_summary):
     channel = client.get_channel(CHANNEL["ID"])
     role = discord.utils.get(channel.guild.roles, id=role)
-    client.loop.create_task(channel.send(content=role.mention, tts=False, allowed_mentions=allowed_mentions,
-                                         embed=embed))
+    # Пока нет возможности разместить уведомление не в начале, не имеет смысла: в пуш-уведомлениях вместо
+    # целевой информации - строка с пингами
+    # content="{0}?\t{1}".format(role.mention, short_summary.replace("_", " "))
+    client.loop.create_task(channel.send(content="", tts=False,
+                                         allowed_mentions=allowed_mentions, embed=embed))
 
 
 # функция получения сообщений из Discord, анализа и удаления (задержка в минутах)
@@ -356,7 +360,7 @@ async def get_messages():
                 try:
                     code = requests.get(url).status_code
                 except Exception as status_error:
-                    print("Get status code error: {0}".format(status_error))
+                    logging.error("Get status code error: {0}".format(status_error))
                 else:
                     if code == 404:
                         fetch_msg = await channel.fetch_message(msg.id)
@@ -392,7 +396,7 @@ async def on_raw_reaction_remove(reaction):
 # Реализация добавления / удаления ролей
 async def role_change(reaction, action):
     if reaction.channel_id == CHANNEL["README"] and reaction.message_id == CHANNEL["README_MSG"]:
-        if reaction.emoji.name == "🇩" or reaction.emoji.name == "🇸" or reaction.emoji.name == "🇻":
+        if reaction.emoji.name == "🇩" or reaction.emoji.name == "🇸" or reaction.emoji.name == "🇼":
             role_id = CHANNEL["ROLES"][reaction.emoji.name]
             channel = client.get_channel(reaction.channel_id)
             role = discord.utils.get(channel.guild.roles, id=role_id)
@@ -431,7 +435,7 @@ def update_wikiset():
             global WIKI_SET
             WIKI_SET = wiki_set_raw
     except Exception as active_sysops_error:
-        print("Update data error: {0}. Closed.".format(active_sysops_error))
+        logging.error("Update data error: {0}. Closed.".format(active_sysops_error))
         time.sleep(120)
         update_wikiset()
     time.sleep(UPD_DELAY * 60 * 60)
@@ -452,8 +456,8 @@ def streams_start():
                     else:
                         delete_handler(e) if "rev_parent_id" in e else new_handler(e)
     except Exception as e:
-        print("Stream error: {0}".format(e))
-        time.sleep(5 * 60)  # 5 min
+        logging.error("Stream error: {0}".format(e))
+        time.sleep(5 * 60)  # 5 мин
         streams_start()
 
 
