@@ -30,13 +30,6 @@ CHANNEL = {"ID": 1025787733463015426, "EMOJI_IDS": [1025790689495220274, 1025791
            "README_MSG": 1025788958384345098, "BOTCOMMANDS": 1025787818997448844,
            "ROLES": {"🇼": 1025799311667232778, "🇩": 1025799458178478161, "🇸": 1025799582002712676}}
 
-
-# CHANNEL = {"ID": 1020710319598883028, "EMOJI_IDS": [1010187383796416542, 1010187351064060005, 1010187427417182210],
-#            "COLORS": [16776960, 65280], "BOT": 1009429427031117935, "README": 1010899364371247194,
-#            "README_MSG": 1010902222969774201, "BOTCOMMANDS": 1020703959763136523,
-#            "ROLES": {"🇼": 1020352779925061662, "🇩": 1020355145873231964, "🇸": 1020355276953628723}}
-
-
 logging.basicConfig(level=logging.ERROR, filename=os.path.dirname(os.getcwd()) + "/swviewer/service/wars/logs.txt",
                     filemode="a+", format="%(asctime)-15s %(levelname)-8s %(message)s")
 config = configparser.ConfigParser(inline_comment_prefixes="#")
