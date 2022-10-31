@@ -263,8 +263,8 @@ def delete_handler(change):
         return
     # Проверяем комментарий к правке и ищем КБУ для оповещения
     if "comment" in change:
-        if change["comment"].lower() in (comm.lower() for comm in DELETE_SUMMARY_STRICT) \
-                or len([ds for ds in DELETE_SUMMARY if ds.lower() in change["comment"].lower()]) > 0 \
+        if (change["comment"].lower() in (comm.lower() for comm in DELETE_SUMMARY_STRICT) \
+                or len([ds for ds in DELETE_SUMMARY if ds.lower() in change["comment"].lower()]) > 0) \
                 and len([comm for comm in EXCLUDES if comm.lower() in change["comment"].lower()]) == 0:
             if "tags" not in change or change["tags"] != "mw-reverted":
                 # Обработчик в случае нахождения КБУ. Оповещение.
