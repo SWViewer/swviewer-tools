@@ -77,7 +77,8 @@ DELETE_SUMMARY = ["Requesting [[WP:CSD|speedy deletion]]", "Requesting deletion"
                   "Requesting [[COM:CSD|speedy deletion]]", "Der Artikel wurde zur Schnelllöschung vorgeschlagen",
                   "Αίτημα [[ΒΠ:ΓΔ|άμεσης διαγραφής]]", "Solicitando borrado rápido",
                   "Merkitty poistettavaksi välittömästi", "Demande de [[WP:CSI|suppression immédiate]]",
-                  "પાનું હટાવવા વિનંતી", "शीघ्र हटाने का अनुरोध", "शीघ्र हटाने का नामांकन", "Meminta [[WP:KPC|penghapusan cepat]]",
+                  "પાનું હટાવવા વિનંતી", "शीघ्र हटाने का अनुरोध", "शीघ्र हटाने का नामांकन",
+                  "Meminta [[WP:KPC|penghapusan cepat]]",
                   "Requesting [[Wikipedia:Viðmið um eyðingu greina|speedy deletion]]",
                   "Requesting [[Project:Deletion|speedy deletion]]", "Requesting [[WM:CSD|speedy deletion]]",
                   "Ber om [[WP:HS|hurtigsletting]]", "Requestin delytion", "Requesting [[WP:QD|quick deletion]]",
@@ -263,8 +264,8 @@ def delete_handler(change):
     # Проверяем комментарий к правке и ищем КБУ для оповещения
     if "comment" in change:
         if change["comment"].lower() in (comm.lower() for comm in DELETE_SUMMARY_STRICT) \
-                or len([ds for ds in DELETE_SUMMARY if ds.lower() in change["comment"].lower()]) > 0
-                and len([comm in comm for EXCLUDES if comm.lower() in change["comment"].lower()]) == 0:
+                or len([ds for ds in DELETE_SUMMARY if ds.lower() in change["comment"].lower()]) > 0 \
+                and len([comm for comm in EXCLUDES if comm.lower() in change["comment"].lower()]) == 0:
             if "tags" not in change or change["tags"] != "mw-reverted":
                 # Обработчик в случае нахождения КБУ. Оповещение.
                 embed = discord.Embed(type="rich", title=change["database"].upper(),
@@ -411,6 +412,8 @@ async def role_change(reaction, action):
 @client.event
 async def on_ready():
     # цикл проверки сообщений и реакций
+    if get_messages.is_running():
+        get_messages.cancel()
     get_messages.start()
 
 
