@@ -7,7 +7,7 @@ from urllib.request import urlopen
 import toolforge
 
 sql = """SELECT site_global_key AS wiki, TRIM(trailing '.org' 
-FROM trim(leading '.' FROM REVERSE(site_domain))) AS domain FROM sites"
+FROM trim(leading '.' FROM REVERSE(site_domain))) AS domain FROM sites
 """
 
 conn = toolforge.connect('metawiki_p')
@@ -42,6 +42,7 @@ if len(all_wikis) >= 500:
     with open('public_html/lists/names.txt', 'w') as names:
         for w in all_wikis:
             names.write(w[0] + "," + w[1] + '\n')
+        names.write("testwiki,test.wikipedia" + '\n')
         names.close()
 
     ex = []
