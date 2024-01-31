@@ -16,11 +16,10 @@ from datetime import datetime, timedelta
 import requests
 from sseclient import SSEClient as EventSource
 
-
 UPD_DELAY = 24  # кол-во часов между обновлениями списка проектов
 LIMIT = 3  # кол-во откатов на проект, порог оповещения
 MINUTES = 30  # кол-во минут отсутствия оповещений из проекта от последнего оповещения
-MAX_MESSAGES = 500  # максимум сообщений, получаемых из Discord ботом для очистки
+MAX_MESSAGES = 10000  # максимум сообщений, получаемых из Discord ботом для очистки
 REPEAT = 10  # задержка между итерациями бота-чистильщика
 # ID канала, ID целевых эмодзи, целевые цвета (для удаления страниц при коде 404), ID целевого участника (бота),
 # ID канала Readme, ID сообщения с ролями, ID канала для команд и ID ролей (w - war / d - deletion / s - spam).
@@ -94,6 +93,7 @@ TOKEN = config["SWVWars"]["bot_discord_token"]
 Intents = discord.Intents.default()
 Intents.members = True
 Intents.message_content = True
+discord.Intents.all()
 allowed_mentions = discord.AllowedMentions(roles=True)
 client = commands.Bot(intents=Intents, command_prefix="/")
 GLOBAL_GROUPS = []
@@ -145,9 +145,9 @@ def get_next_user(domain, page_id, title, timestamp_stream, timestamp):
             next_user = next_user_raw["query"]["pages"][str(page_id)]["revisions"][0]["user"]
             next_parent_id = next_user_raw["query"]["pages"][str(page_id)]["revisions"][0]["parentid"]
             next_rev_id = next_user_raw["query"]["pages"][str(page_id)]["revisions"][0]["revid"]
-        except Exception as next_user_error:
-            if str(next_user_error) != "'revisions'":
-                logging.error("Get next user error: {0}".format(next_user_error))
+        except Exception as e:
+            if str(e) != "'revisions'":
+                logging.error("Get next user error: {0}".format(e))
             pass
         else:
             break
@@ -162,8 +162,8 @@ def get_next_user_groups(domain, user):
     try:
         r = requests.post("https://{0}/w/api.php".format(domain), data=data, headers=USER_AGENT).json()
         next_user_groups = r["query"]["users"][0]["groups"]
-    except Exception as next_user_groups_error:
-        logging.error("Get groups error: {0}".format(next_user_groups_error))
+    except Exception as e:
+        logging.error("Get groups error: {0}".format(e))
         return []
     else:
         return next_user_groups
@@ -228,8 +228,8 @@ def new_handler(change):
             text_check_els = requests.get(url_check_els).text
             if len([el for el in ELEMENTS if el in text_check_els]) > 0:
                 return
-        except Exception as get_raw_error:
-            logging.error("Get check elements text error: {0}".format(get_raw_error))
+        except Exception as e:
+            logging.error("Get check elements text error: {0}".format(e))
             return
         # Проверка на наличие внешних ссылок на странице (минимум 1)
         try:
@@ -243,8 +243,8 @@ def new_handler(change):
                 return
             if len(ext_check["query"]["pages"][str(change["page_id"])]["extlinks"]) == 0:
                 return
-        except Exception as links_error:
-            logging.error("Get external links error: {0}".format(links_error))
+        except Exception as e:
+            logging.error("Get external links error: {0}".format(e))
             return
         prefix_title = "Page" if change["page_namespace"] == 0 else "Userpage"
         embed = discord.Embed(type="rich", title=change["database"].upper(),
@@ -263,7 +263,7 @@ def delete_handler(change):
         return
     # Проверяем комментарий к правке и ищем КБУ для оповещения
     if "comment" in change:
-        if (change["comment"].lower() in (comm.lower() for comm in DELETE_SUMMARY_STRICT) \
+        if (change["comment"].lower() in (comm.lower() for comm in DELETE_SUMMARY_STRICT)
                 or len([ds for ds in DELETE_SUMMARY if ds.lower() in change["comment"].lower()]) > 0) \
                 and len([comm for comm in EXCLUDES if comm.lower() in change["comment"].lower()]) == 0:
             if "tags" not in change or change["tags"] != "mw-reverted":
@@ -348,41 +348,50 @@ def send_report(embed, role, short_summary):
 # функция получения сообщений из Discord, анализа и удаления (задержка в минутах)
 @tasks.loop(minutes=float(REPEAT / 60))
 async def get_messages():
-    channel = client.get_channel(CHANNEL["ID"])
-    # удаление с кодами 404 по ссылкам
-    messages = channel.history(limit=MAX_MESSAGES)
-    async for msg in messages:
-        if msg.author.id != CHANNEL["BOT"]:
-            continue
-        for embed in msg.embeds:
-            embed_dict = embed.to_dict()
-            # print(embed_dict["color"]) - для получения цветов при настройке бота
-            if embed_dict["color"] in CHANNEL["COLORS"]:
-                url = re.sub("[?|&]oldid=\\d*", "", embed_dict["url"])
-                url = re.sub("[?|&]uselang=en", "", url)
-                url = "{0}?action=raw".format(url)
-                try:
-                    code = requests.get(url).status_code
-                except Exception as status_error:
-                    logging.error("Get status code error: {0}".format(status_error))
-                else:
-                    if code == 404:
-                        fetch_msg = await channel.fetch_message(msg.id)
-                        await fetch_msg.delete()
-                        break
-    time.sleep(5)
-    # удаление по реакциям
-    messages = channel.history(limit=MAX_MESSAGES)
-    async for msg in messages:
-        if msg.author.id != CHANNEL["BOT"]:
-            continue
-        for reaction in msg.reactions:
-            if hasattr(reaction.emoji, "id"):
-                # print(reaction.emoji.id) - - для получения id эмодзи при настройке бота
-                if reaction.emoji.id in CHANNEL["EMOJI_IDS"]:
-                    fetch_msg = await channel.fetch_message(msg.id)
-                    await fetch_msg.delete()
-                    break
+    try:
+        channel = client.get_channel(CHANNEL["ID"])
+    except Exception as e:
+        logging.error(e)
+    else:
+        try:
+            # удаление с кодами 404 по ссылкам
+            messages = channel.history(limit=MAX_MESSAGES, oldest_first=True)
+            async for msg in messages:
+                if msg.author.id != CHANNEL["BOT"]:
+                    continue
+                for reaction in msg.reactions:
+                    if hasattr(reaction.emoji, "id"):
+                        # print(f'Emoji: {reaction.emoji.id}')  # - для получения id эмодзи при настройке бота
+                        if reaction.emoji.id in CHANNEL["EMOJI_IDS"]:
+                            try:
+                                fetch_msg = await channel.fetch_message(msg.id)
+                            except Exception as e:
+                                logging.error(e)
+                            else:
+                                await fetch_msg.delete()
+                                break
+                for embed in msg.embeds:
+                    embed_dict = embed.to_dict()
+                    # print(f'Color: {embed_dict["color"]}')  # - для получения цветов при настройке бота
+                    if embed_dict["color"] in CHANNEL["COLORS"]:
+                        url = re.sub("[?|&]oldid=\\d*", "", embed_dict["url"])
+                        url = re.sub("[?|&]uselang=en", "", url)
+                        url = "{0}?action=raw".format(url)
+                        try:
+                            code = requests.get(url).status_code
+                        except Exception as e:
+                            logging.error(f"Get status code error: {e}.")
+                        else:
+                            if code == 404:
+                                try:
+                                    fetch_msg = await channel.fetch_message(msg.id)
+                                except Exception as e:
+                                    logging.error(e)
+                                else:
+                                    await fetch_msg.delete()
+                                    break
+        except Exception as e:
+            logging.error(f"Error during async for [1]: {e}")
 
 
 # Добавление ролей для оповещения
@@ -412,9 +421,15 @@ async def role_change(reaction, action):
 @client.event
 async def on_ready():
     # цикл проверки сообщений и реакций
-    if get_messages.is_running():
-        get_messages.cancel()
-    get_messages.start()
+    try:
+        if get_messages.is_running():
+            pass
+            # get_messages.cancel()
+            # get_messages.start()
+        else:
+            get_messages.start()
+    except Exception as e:
+        print(f'Error during get messages from Discord: {e}.')
 
 
 def update_wikiset():
@@ -440,8 +455,8 @@ def update_wikiset():
         if len(wiki_set_raw) > 10:
             global WIKI_SET
             WIKI_SET = wiki_set_raw
-    except Exception as active_sysops_error:
-        logging.error("Update data error: {0}. Closed.".format(active_sysops_error))
+    except Exception as e:
+        logging.error("Update data error: {0}. Closed.".format(e))
         time.sleep(120)
         update_wikiset()
     time.sleep(UPD_DELAY * 60 * 60)
@@ -457,10 +472,12 @@ def streams_start():
                 except ValueError:
                     pass
                 else:
-                    if e["meta"]["stream"] == "mediawiki.revision-tags-change":
-                        revert_handler(e)
-                    else:
-                        delete_handler(e) if "rev_parent_id" in e else new_handler(e)
+                    # пропускаем страницы с полносттью скрытыми именами (война в Украине)
+                    if e["meta"]["domain"] != "canary" and "performer" in e:
+                        if e["meta"]["stream"] == "mediawiki.revision-tags-change":
+                            revert_handler(e)
+                        else:
+                            delete_handler(e) if "rev_parent_id" in e else new_handler(e)
     except Exception as e:
         logging.error("Stream error: {0}".format(e))
         time.sleep(5 * 60)  # 5 мин
@@ -471,7 +488,6 @@ def streams_start():
 threading.Thread(target=update_wikiset, name="update").start()
 threading.Thread(target=client.run, args=[TOKEN], kwargs={"reconnect": True, "log_level": logging.ERROR},
                  name="cleaner").start()
-
 # цикл ожидания заполнения переменных
 while len(GLOBAL_GROUPS) == 0 or len(WIKI_SET) == 0:
     time.sleep(1)
